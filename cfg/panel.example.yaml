@@ -1,0 +1,27 @@
+io:
+  train_fcs_dir: ./data/train
+  train_gates_csv: ./data/train/gates.csv
+  target_fcs_dir: ./data/target
+  out_dir: ./out/gates
+  eval_truth_csv: ./data/eval/truth.csv
+panel:
+  channels: [FSC-A, SSC-A, CD3-A, CD8-A]
+  transform: asinh
+  compensation: auto
+  ranges:
+    FSC-A: [0.0, 5.0]
+    SSC-A: [0.0, 5.0]
+    CD3-A: [0.0, 5.0]
+    CD8-A: [0.0, 5.0]
+imaging:
+  bins: 256
+  smooth_sigma: 0
+registration:
+  grid_spacing: 32
+  levels: 3
+  iterations: 200
+selection:
+  metric: l2
+logging:
+  level: INFO
+  log_dir: ./out/logs
