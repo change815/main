@@ -1,0 +1,22 @@
+[project]
+name = "autogate"
+version = "0.1.0"
+description = "Elastic registration driven polygon gating"
+requires-python = ">=3.10"
+authors = [{name = "Autogate Team"}]
+dependencies = [
+    "numpy>=1.23",
+    "pandas>=1.5",
+    "scipy>=1.9",
+    "SimpleITK>=2.2",
+    "fcsparser>=0.2",
+    "PyYAML>=6.0",
+    "matplotlib>=3.6",
+]
+
+[project.scripts]
+autogate = "autogate.cli:main"
+
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
