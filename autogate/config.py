@@ -14,6 +14,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "train_gates_csv": "./data/train/gates.csv",
         "target_fcs_dir": "./data/target",
         "out_dir": "./out/gates",
+        "labels_dir": None,
+        "plots_dir": None,
         "eval_truth_csv": None,
     },
     "panel": {
@@ -37,6 +39,19 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "logging": {
         "level": "INFO",
         "log_dir": "./out/logs",
+    },
+    "visualization": {
+        "ungated_color": "#9e9e9e",
+        "population_colors": {
+            "default": {},
+        },
+    },
+    "evaluation": {
+        "mode": "auto",
+        "label_column": "population",
+        "sample_id_column": "sample_id",
+        "event_index_column": "event_index",
+        "include_ungated": True,
     },
 }
 

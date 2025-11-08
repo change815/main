@@ -39,6 +39,7 @@ def test_pipeline_smoke(tmp_path: Path):
                 "channel_y": "B",
                 "points": "[(-1,-1),(1,-1),(1,1),(-1,1)]",
                 "fcs_file": "train1.csv",
+                "population": "C",
             },
             {
                 "gate_id": "g2",
@@ -48,6 +49,7 @@ def test_pipeline_smoke(tmp_path: Path):
                 "channel_y": "B",
                 "points": "[(0,0),(2,0),(2,2),(0,2)]",
                 "fcs_file": "train2.csv",
+                "population": "Mono",
             },
         ]
     )
@@ -87,6 +89,9 @@ def test_pipeline_smoke(tmp_path: Path):
     output_files = list(out_dir.glob("*_gates.csv"))
     assert output_files, "Expected gate CSV outputs"
     labels_dir = out_dir / "event_labels"
-    assert (labels_dir / "target1_labels.csv").exists(), "Expected per-event labels"
+    labels_path = labels_dir / "target1_labels.csv"
+    assert labels_path.exists(), "Expected per-event labels"
+    labels_df = pd.read_csv(labels_path)
+    assert {"population", "gate_id"}.issubset(labels_df.columns)
     plots_dir = out_dir / "plots"
     assert list(plots_dir.glob("*.png")), "Expected visualization PNGs"

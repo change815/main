@@ -69,11 +69,14 @@ class AutoGatePipeline:
         self.training_gates: Dict[str, Dict[Tuple[str, str], List[Gate]]] = defaultdict(lambda: defaultdict(list))
         self.training_data_paths: Dict[str, Path] = {}
         io_cfg = config.get("io", {})
-        self.gates_out_dir = Path(io_cfg.get("out_dir", "./out/gates"))
-        labels_default = self.gates_out_dir / "event_labels"
-        plots_default = self.gates_out_dir / "plots"
-        self.labels_dir = Path(io_cfg.get("labels_dir", labels_default))
-        self.plots_dir = Path(io_cfg.get("plots_dir", plots_default))
+        out_dir_value = io_cfg.get("out_dir", "./out/gates")
+        self.gates_out_dir = Path(out_dir_value)
+        labels_value = io_cfg.get("labels_dir")
+        plots_value = io_cfg.get("plots_dir")
+        self.labels_dir = Path(labels_value) if labels_value else self.gates_out_dir / "event_labels"
+        self.plots_dir = Path(plots_value) if plots_value else self.gates_out_dir / "plots"
+        self.visual_cfg = config.get("visualization", {})
+        self.default_ungated_color = self.visual_cfg.get("ungated_color", "#9e9e9e")
 
     def _list_fcs_files(self, directory: Path) -> List[Path]:
         if not directory.exists():
@@ -227,6 +230,11 @@ class AutoGatePipeline:
             for plot in plots:
                 channel_x, channel_y = plot
                 figure_path = self.plots_dir / f"{target_path.stem}__{channel_x}__{channel_y}.png"
+                plot_key = f"{channel_x}__{channel_y}"
+                color_cfg = {
+                    **self.visual_cfg.get("population_colors", {}).get("default", {}),
+                    **self.visual_cfg.get("population_colors", {}).get(plot_key, {}),
+                }
                 try:
                     plot_population_scatter(
                         data,
@@ -234,6 +242,8 @@ class AutoGatePipeline:
                         channel_x,
                         channel_y,
                         figure_path,
+                        color_overrides=color_cfg,
+                        ungated_color=self.default_ungated_color,
                     )
                 except Exception as exc:  # pragma: no cover - plotting errors are rare
                     LOGGER.warning(

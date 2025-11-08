@@ -27,3 +27,24 @@ selection:
 logging:
   level: INFO
   log_dir: ./out/logs
+visualization:
+  ungated_color: "#616161"
+  population_colors:
+    default:
+      UNGATED: "#616161"
+    "CD34 ECD-A__CD45 APC-A750-A":
+      H: "#ff7f0e"
+    "CD117 PE-A__CD45 APC-A750-A":
+      G: "#1f77b4"
+    "SSC-A__CD45 APC-A750-A":
+      C: "#e31a1c"
+      Mono: "#1f78b4"
+      Lym: "#33a02c"
+      Gra: "#ff7f00"
+      F: "#6a3d9a"
+evaluation:
+  mode: auto
+  label_column: cell_type
+  sample_id_column: sample_id
+  event_index_column: event_index
+  include_ungated: true

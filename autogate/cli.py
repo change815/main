@@ -51,7 +51,15 @@ def cmd_eval(args: argparse.Namespace) -> None:
     log_dir = Path(config.get("logging", {}).get("log_dir", "./out/logs"))
     log_file = configure_logging(log_dir, config.get("logging", {}).get("level", "INFO"))
 
-    predictions_value = args.predictions or config.get("io", {}).get("out_dir", "./out/gates")
+    eval_cfg = config.get("evaluation", {})
+    mode = (args.mode or eval_cfg.get("mode", "auto")).lower()
+    default_predictions = config.get("io", {}).get("out_dir", "./out/gates")
+    if mode in {"auto", "labels"}:
+        default_predictions = config.get("io", {}).get(
+            "labels_dir",
+            Path(default_predictions) / "event_labels",
+        )
+    predictions_value = args.predictions or default_predictions
     predictions_dir = Path(predictions_value)
     truth_value = args.truth or config.get("io", {}).get("eval_truth_csv")
     if not truth_value:
@@ -60,7 +68,7 @@ def cmd_eval(args: argparse.Namespace) -> None:
     if not truth_csv.exists():
         raise FileNotFoundError(f"Truth CSV not found: {truth_csv}")
 
-    results = evaluate(config, predictions_dir, truth_csv)
+    results = evaluate(config, predictions_dir, truth_csv, mode=mode)
     LOGGER.info("Evaluation results: %s", json.dumps({k: v for k, v in results.items() if k != "metrics"}, indent=2))
     print(f"Evaluation complete. Logs: {log_file}")
 
@@ -79,8 +87,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     eval_parser = subparsers.add_parser("eval", help="Evaluate predictions against truth CSV")
     _add_common_run_arguments(eval_parser)
-    eval_parser.add_argument("--predictions", help="Directory containing predicted gate CSVs", default=None)
-    eval_parser.add_argument("--truth", help="Path to truth gates CSV", default=None)
+    eval_parser.add_argument("--predictions", help="Directory containing prediction CSVs", default=None)
+    eval_parser.add_argument("--truth", help="Path to truth data (CSV or directory)", default=None)
+    eval_parser.add_argument(
+        "--mode",
+        choices=["auto", "gates", "labels"],
+        default=None,
+        help="Evaluation mode (auto-detect, polygon gates, or per-event labels)",
+    )
     eval_parser.set_defaults(func=cmd_eval)
 
     return parser

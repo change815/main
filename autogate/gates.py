@@ -30,6 +30,7 @@ class Gate:
     channel_y: str
     points: List[Tuple[float, float]]
     fcs_file: Optional[str] = None
+    population: Optional[str] = None
 
     def to_record(self) -> dict:
         pts = [(float(x), float(y)) for x, y in self.points]
@@ -41,6 +42,7 @@ class Gate:
             "channel_y": self.channel_y,
             "points": json.dumps(pts),
             "fcs_file": self.fcs_file,
+            "population": self.population,
         }
 
 
@@ -63,15 +65,22 @@ def read_gates(path: Path | str) -> List[Gate]:
         if pts is None:
             LOGGER.warning("Skipping gate %s due to invalid points format", row.get("gate_id"))
             continue
+        population = None
+        for col in ("population", "cell_type", "label"):
+            if col in row and not pd.isna(row[col]):
+                population = str(row[col])
+                break
+        gate_id = str(row["gate_id"])
         gates.append(
             Gate(
-                gate_id=str(row["gate_id"]),
+                gate_id=gate_id,
                 parent_id=str(row.get("parent_id", "")),
                 gate_type=str(row.get("type", "polygon")),
                 channel_x=str(row.get("channel_x")),
                 channel_y=str(row.get("channel_y")),
                 points=pts,
                 fcs_file=str(row.get("fcs_file")) if not pd.isna(row.get("fcs_file")) else None,
+                population=population or gate_id,
             )
         )
     return gates
@@ -82,8 +91,13 @@ def write_gates(path: Path | str, gates: Iterable[Gate]) -> None:
     path = Path(path)
     records = [gate.to_record() for gate in gates]
     df = pd.DataFrame(records)
+    drop_cols = []
     if "fcs_file" in df.columns and df["fcs_file"].isnull().all():
-        df = df.drop(columns=["fcs_file"])
+        drop_cols.append("fcs_file")
+    if "population" in df.columns and df["population"].isnull().all():
+        drop_cols.append("population")
+    if drop_cols:
+        df = df.drop(columns=drop_cols)
     df.to_csv(path, index=False)
 
 
@@ -105,6 +119,7 @@ def transform_gate(
         channel_y=gate.channel_y,
         points=transformed_points,
         fcs_file=None,
+        population=gate.population,
     )
 
 
@@ -211,6 +226,7 @@ def assign_populations(data: pd.DataFrame, gates: Sequence[Gate]) -> pd.DataFram
         leaves = list(gate_map.keys())
 
     assigned_labels = np.array(["UNGATED"] * len(data), dtype=object)
+    assigned_gate_ids = np.array([""] * len(data), dtype=object)
     assigned_depth = np.full(len(data), -1, dtype=int)
     assigned_path = np.array([""] * len(data), dtype=object)
 
@@ -234,7 +250,9 @@ def assign_populations(data: pd.DataFrame, gates: Sequence[Gate]) -> pd.DataFram
         update_mask = mask & (depth >= assigned_depth)
         if not np.any(update_mask):
             continue
-        assigned_labels[update_mask] = gate_id
+        assigned_gate = gate_map[gate_id]
+        assigned_labels[update_mask] = assigned_gate.population or gate_id
+        assigned_gate_ids[update_mask] = gate_id
         assigned_depth[update_mask] = depth
         path_str = build_path(gate_id)
         assigned_path[update_mask] = path_str
@@ -243,6 +261,7 @@ def assign_populations(data: pd.DataFrame, gates: Sequence[Gate]) -> pd.DataFram
         {
             "event_index": np.arange(len(data), dtype=int),
             "population": assigned_labels,
+            "gate_id": assigned_gate_ids,
             "depth": assigned_depth,
             "gate_path": assigned_path,
         }

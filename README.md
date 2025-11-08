@@ -62,18 +62,21 @@ SimpleITK 官方轮子覆盖主流平台 (`manylinux`, `win_amd64`, `macosx_arm6
 - `registration.*`：B-样条网格间距、金字塔层数、最大迭代数。
 - `selection.metric`：训练样本选择度量，目前仅支持 `l2`。
 - `logging.*`：日志级别与目录。
+- `visualization.*`：控制散点图配色；示例配置已针对 `CD34/CD117/SSC` 三个坐标系给出专属颜色，`UNGATED` 会使用 `ungated_color` 指定的灰色。
+- `evaluation.*`：评估模式及真值列名；若提供事件级真值标签，保持 `mode: auto` 即可自动检测。
 
 ### 训练门 CSV 约定
 
-| 列名        | 说明                                                       |
-|-------------|------------------------------------------------------------|
-| `gate_id`   | 唯一标识                                                   |
-| `parent_id` | 父级门（保留字段）                                         |
-| `type`      | 固定为 `polygon`                                           |
-| `channel_x` | X 轴通道                                                   |
-| `channel_y` | Y 轴通道                                                   |
-| `points`    | 形如 `[(x1,y1),(x2,y2),...]` 的 JSON 风格字符串            |
-| `fcs_file`  | 训练门对应的 FCS 文件名（含或不含后缀皆可），缺省时取首个训练文件 |
+| 列名          | 说明                                                       |
+|---------------|------------------------------------------------------------|
+| `gate_id`     | 唯一标识                                                   |
+| `parent_id`   | 父级门（保留字段）                                         |
+| `type`        | 固定为 `polygon`                                           |
+| `channel_x`   | X 轴通道                                                   |
+| `channel_y`   | Y 轴通道                                                   |
+| `points`      | 形如 `[(x1,y1),(x2,y2),...]` 的 JSON 风格字符串            |
+| `population`  | （推荐）该门对应的细胞类别，例如 `H`、`G`、`Mono` 等；若缺失则默认等同于 `gate_id` |
+| `fcs_file`    | 训练门对应的 FCS 文件名（含或不含后缀皆可），缺省时取首个训练文件 |
 
 ## 保姆级使用流程
 
@@ -92,10 +95,24 @@ mkdir -p data/train data/target out/gates out/logs
 1. **训练 FCS** 放入 `data/train/`，文件名示例 `donor01.fcs`、`donor02.fcs`。
 2. **训练门 CSV**：
    - 必备字段：`gate_id,parent_id,type,channel_x,channel_y,points,fcs_file`。
+   - `population` 建议填写细胞类别（如 `H`、`G`、`C`/`Mono`/`Lym`/`Gra`/`F`），这样事件级标签将直接使用这些名称；若缺失则默认使用 `gate_id`。
    - `points` 是字符串形式的顶点序列，如 `[(123.4,56.7),(140.2,80.1),...]`，首尾会自动闭合。
    - `fcs_file` 用于指明该门来自哪一个训练 FCS（必须能在 `data/train/` 找到同名文件）。如果所有门都来自同一文件也可以只填写一次并向下填充。
    - 若你现在的数据是事件级 CSV（如截图中包含 `FSC-A, SSC-A, CD3 APC-A750, cell_type` 等列），需要先在第三方工具（FlowJo、Cytobank、Kaluza 等）或自编脚本中**画出多边形门并导出顶点**，再整理成上述格式。事件级 CSV 可辅助你确定坐标范围，但不能直接作为门 CSV 使用。
 3. `cfg/panel.yaml` 中的 `io.train_fcs_dir` 指向训练 FCS 目录，`io.train_gates_csv` 指向训练门 CSV。
+
+### 2.1 准备真值标签 CSV（用于 F1）
+
+若你已经为目标样本准备了事件级的“细胞类型标注 CSV”（例如 `sample003.csv` 包含 `CD34 ECD-A, CD45 APC-A750-A, cell_type` 等列），需按如下格式整理以便评估：
+
+1. **统一列名**：创建一个新的 CSV 或目录，至少包含三列：
+   - `sample_id`：与目标 FCS 文件名（不含扩展名）一致，例如 `003`、`006`、`007`；
+   - `event_index`：对应 FCS 行号，从 0 开始递增。若原始 CSV 保持与 FCS 相同顺序，可直接添加一列 `event_index = range(len(df))`；
+   - `cell_type`：事件所属的真实细胞类别（`H`、`G`、`C`、`Mono`、`Lym`、`Gra`、`F` 等）。
+2. **保存位置**：可以将全部样本合并为一个 CSV（推荐命名为 `data/eval/labels.csv`），也可以一个样本一份放在目录 `data/eval/labels/` 下，文件名任意但需保持 `.csv` 后缀。
+3. **配置修改**：在 `cfg/panel.yaml` 中设置 `io.eval_truth_csv` 指向该 CSV 或目录；`evaluation.label_column/sample_id_column/event_index_column` 可按需要调整（默认即 `cell_type/sample_id/event_index`）。
+
+> 提示：若原始标注按坐标组合分别保存（类似截图中的三份 `annotation_*.csv`），请先合并为一个文件，并确保 `sample_id` 与 FCS 对应，否则无法对齐事件级预测。
 
 ### 3. 准备目标数据
 
@@ -123,18 +140,26 @@ autogate run --config cfg/panel.yaml --out-dir ./out/gates
 运行完成后会生成三类结果：
 
 - `out/gates/<sample>_gates.csv`：目标样本的形变后多边形门。可用于后续评估或导入流式软件。 
-- `out/gates/event_labels/<sample>_labels.csv`：逐细胞的预测类别，字段包括 `event_index`（原始顺序）、`population`（叶子门 ID）、`depth`（在门树的深度）和 `gate_path`（从根到该门的路径）。
-- `out/gates/plots/<sample>__<channel_x>__<channel_y>.png`：按配置通道组合绘制的散点图，不同颜色对应预测类别，可快速肉眼核对圈门效果。`UNGATED` 代表未被任何叶子门覆盖的事件。
+- `out/gates/event_labels/<sample>_labels.csv`：逐细胞的预测类别，字段包括 `event_index`（原始顺序）、`population`（最终细胞类型，如 `H`/`G`/`C`/`Mono` 等）、`gate_id`（叶子门名称）、`depth` 和 `gate_path`（从根到该门的路径）。
+- `out/gates/plots/<sample>__<channel_x>__<channel_y>.png`：按配置通道组合绘制的散点图，不同颜色对应预测类别，可快速肉眼核对圈门效果。示例配置中已经指定：`CD34/CD45` 图仅显示 `H` 与未分类，`CD117/CD45` 图显示 `G` 与未分类，`SSC/CD45` 图分别给 `C`、`Mono`、`Lym`、`Gra`、`F` 与 `UNGATED` 不同颜色。
 
 ### 6. （可选）评估 F1
 
-若有真值门 CSV（`cfg/panel.yaml` 的 `io.eval_truth_csv` 或命令行 `--truth` 指定）：
+根据真值类型选择评估模式：
 
-```bash
-autogate eval --config cfg/panel.yaml --truth ./data/eval/truth.csv
-```
+- **多边形门真值**（`truth` 含 `points` 列）：
+  ```bash
+  autogate eval --config cfg/panel.yaml --mode gates --truth ./data/eval/truth.csv
+  ```
+  输出的 `evaluation.csv` 会列出每个门的 Precision/Recall/F1，并在日志中给出宏/微平均成绩。
+- **事件级标签真值**（第 2.1 步整理的 `labels.csv` 或目录）：
+  ```bash
+  autogate eval --config cfg/panel.yaml --mode labels \
+    --predictions ./out/gates/event_labels --truth ./data/eval/labels.csv
+  ```
+  程序将按 `event_index` 对齐预测与真值，统计各细胞类型的 TP/FP/FN 并输出 `evaluation.csv`（列含 `sample_id,population,precision,recall,f1,tp` 等）。
 
-评估结果会在 `out/gates/evaluation.csv` 中给出每个门的 Precision/Recall/F1，并在日志和控制台输出宏/微平均分。当自动门与真值内细胞数量极少时，会附加“不稳定”提示。
+若保持 `mode: auto` 且未在命令行指定，工具会根据真值是否包含 `points` 列自动判别。无论哪种模式，当某个门/细胞类型的事件数不足 10 个时，日志会提示 `LOW_COUNTS`，请结合上下文谨慎解读。
 
 ### 7. 排查与调优
 

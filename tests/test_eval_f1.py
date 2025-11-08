@@ -58,6 +58,43 @@ def test_evaluate_perfect_scores(tmp_path: Path):
         },
     }
 
-    results = evaluate(config, out_dir, truth_csv)
+    results = evaluate(config, out_dir, truth_csv, mode="gates")
     assert results["macro_f1"] == 1.0
     assert results["micro_f1"] == 1.0
+
+
+def test_label_evaluation(tmp_path: Path):
+    predictions_dir = tmp_path / "pred"
+    predictions_dir.mkdir()
+    truth_dir = tmp_path / "truth"
+    truth_dir.mkdir()
+
+    pred_df = pd.DataFrame(
+        {
+            "event_index": [0, 1, 2, 3],
+            "population": ["C", "C", "UNGATED", "Mono"],
+        }
+    )
+    pred_df.to_csv(predictions_dir / "sample_labels.csv", index=False)
+
+    truth_df = pd.DataFrame(
+        {
+            "sample_id": ["sample"] * 4,
+            "event_index": [0, 1, 2, 3],
+            "cell_type": ["C", "Mono", "UNGATED", "Mono"],
+        }
+    )
+    truth_df.to_csv(truth_dir / "labels.csv", index=False)
+
+    config = {
+        "evaluation": {
+            "mode": "labels",
+            "label_column": "cell_type",
+            "sample_id_column": "sample_id",
+            "event_index_column": "event_index",
+        }
+    }
+
+    results = evaluate(config, predictions_dir, truth_dir, mode="labels")
+    assert results["macro_f1"] > 0
+    assert results["mode"] == "labels"

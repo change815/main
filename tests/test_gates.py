@@ -21,6 +21,7 @@ def test_read_gates_skips_invalid(tmp_path: Path):
                 "channel_x": "A",
                 "channel_y": "B",
                 "points": "[(0,0),(1,0),(1,1),(0,1)]",
+                "population": "H",
             },
             {
                 "gate_id": "g2",
@@ -36,6 +37,7 @@ def test_read_gates_skips_invalid(tmp_path: Path):
     gates = read_gates(csv_path)
     assert len(gates) == 1
     assert gates[0].gate_id == "g1"
+    assert gates[0].population == "H"
 
 
 def test_transform_gate_identity():
@@ -68,6 +70,7 @@ def test_assign_populations_hierarchy():
             channel_x="A",
             channel_y="B",
             points=[(0, 0), (1, 0), (1, 1), (0, 1)],
+            population="root",
         ),
         Gate(
             gate_id="child_gate",
@@ -76,8 +79,10 @@ def test_assign_populations_hierarchy():
             channel_x="A",
             channel_y="B",
             points=[(0.4, 0.4), (0.9, 0.4), (0.9, 0.9), (0.4, 0.9)],
+            population="child",
         ),
     ]
     assignments = assign_populations(df, gates)
-    assert list(assignments["population"]) == ["root_gate", "child_gate", "child_gate", "UNGATED"]
+    assert list(assignments["population"]) == ["root", "child", "child", "UNGATED"]
+    assert list(assignments["gate_id"]) == ["root_gate", "child_gate", "child_gate", ""]
     assert assignments.loc[1, "depth"] > assignments.loc[0, "depth"]

@@ -57,6 +57,8 @@ def plot_population_scatter(
     sample_size: int | None = None,
     point_size: float = 4.0,
     alpha: float = 0.5,
+    color_overrides: dict[str, str] | None = None,
+    ungated_color: str = "#9e9e9e",
 ) -> None:
     """Render a scatter plot colored by population labels."""
 
@@ -82,7 +84,10 @@ def plot_population_scatter(
         cmap = plt.get_cmap("tab20")
         color_cycle = [cmap(i) for i in np.linspace(0, 1, len(order))]
 
-    color_map = {label: color_cycle[i % len(color_cycle)] for i, label in enumerate(order)}
+    overrides = color_overrides or {}
+    color_map = {label: overrides.get(label, color_cycle[i % len(color_cycle)]) for i, label in enumerate(order)}
+    if "UNGATED" in order:
+        color_map["UNGATED"] = overrides.get("UNGATED", ungated_color)
 
     for label in order:
         subset = df[df["population"] == label]
