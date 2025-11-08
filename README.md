@@ -92,27 +92,55 @@ mkdir -p data/train data/target out/gates out/logs
 
 ### 2. 准备训练数据
 
-1. **训练 FCS** 放入 `data/train/`，文件名示例 `donor01.fcs`、`donor02.fcs`。
-2. **训练门 CSV**：
-   - 必备字段：`gate_id,parent_id,type,channel_x,channel_y,points,fcs_file`。
-   - `population` 建议填写细胞类别（如 `H`、`G`、`C`/`Mono`/`Lym`/`Gra`/`F`），这样事件级标签将直接使用这些名称；若缺失则默认使用 `gate_id`。
-   - `points` 是字符串形式的顶点序列，如 `[(123.4,56.7),(140.2,80.1),...]`，首尾会自动闭合。
-   - `fcs_file` 用于指明该门来自哪一个训练 FCS（必须能在 `data/train/` 找到同名文件）。如果所有门都来自同一文件也可以只填写一次并向下填充。
-   - 若你现在的数据是事件级 CSV（如截图中包含 `FSC-A, SSC-A, CD3 APC-A750, cell_type` 等列），需要先在第三方工具（FlowJo、Cytobank、Kaluza 等）或自编脚本中**画出多边形门并导出顶点**，再整理成上述格式。事件级 CSV 可辅助你确定坐标范围，但不能直接作为门 CSV 使用。
-3. `cfg/panel.yaml` 中的 `io.train_fcs_dir` 指向训练 FCS 目录，`io.train_gates_csv` 指向训练门 CSV。
+1. **训练 FCS** 放入 `data/train/`，文件名示例 `001.fcs`、`002.fcs`。命令默认假设 `CSV/train/001/` 对应 `data/train/001.fcs`，如需其它命名可通过 `prepare-annotations --fcs-suffix` 调整。
+2. **一键从标注 CSV 生成训练门**：如果你已经像截图那样在 `CSV/train/<样本>/annotation_*.csv` 中存放了 `(channel_x, channel_y, cell_type)` 标注，可直接运行：
+
+   ```bash
+   autogate prepare-annotations \
+     --csv-root ./CSV/train \
+     --spec ./cfg/annotations.example.yaml \
+     --output ./data/train/gates.csv \
+     --summary ./cfg/annotations.summary.yaml
+   ```
+
+   - `cfg/annotations.example.yaml` 预设了 3 个坐标系与必圈细胞：`CD34/CD45`→`H`、`CD117/CD45`→`G`、`SSC/CD45`→`C/Mono/Lym/Gra/F`。
+   - 命令会为每个 `(channel_x, channel_y, population)` 自动计算凸包并适度外扩，生成可直接用于训练的多边形门 CSV，同时统计所有通道的 0.1%~99.9% 分位范围写入 `annotations.summary.yaml`。
+   - 若某个群体点数过少（默认 <20），日志会提示 `polygon may be unstable`，可酌情补充标注或手动检查形状。
+
+3. **手动整理门（可选）**：若仍希望自行绘制多边形，依旧可以按表格格式准备 `gates.csv`，字段要求与旧版本一致。
+4. `cfg/panel.yaml` 中的 `io.train_fcs_dir` 指向训练 FCS 目录，`io.train_gates_csv` 指向步骤 2/3 产出的 CSV。
+
+> 运行 `prepare-annotations` 后可参考 `cfg/annotations.summary.yaml` 更新 `panel.channels` 与 `panel.ranges`，确保自动圈门与可视化使用一致的坐标量程。
 
 ### 2.1 准备真值标签 CSV（用于 F1）
 
 若你已经为目标样本准备了事件级的“细胞类型标注 CSV”（例如 `sample003.csv` 包含 `CD34 ECD-A, CD45 APC-A750-A, cell_type` 等列），需按如下格式整理以便评估：
 
-1. **统一列名**：创建一个新的 CSV 或目录，至少包含三列：
+1. **统一列名**：将每个目标样本的标注合并为与 FCS 行顺序一致的一张表，至少包含三列：
    - `sample_id`：与目标 FCS 文件名（不含扩展名）一致，例如 `003`、`006`、`007`；
-   - `event_index`：对应 FCS 行号，从 0 开始递增。若原始 CSV 保持与 FCS 相同顺序，可直接添加一列 `event_index = range(len(df))`；
-   - `cell_type`：事件所属的真实细胞类别（`H`、`G`、`C`、`Mono`、`Lym`、`Gra`、`F` 等）。
-2. **保存位置**：可以将全部样本合并为一个 CSV（推荐命名为 `data/eval/labels.csv`），也可以一个样本一份放在目录 `data/eval/labels/` 下，文件名任意但需保持 `.csv` 后缀。
-3. **配置修改**：在 `cfg/panel.yaml` 中设置 `io.eval_truth_csv` 指向该 CSV 或目录；`evaluation.label_column/sample_id_column/event_index_column` 可按需要调整（默认即 `cell_type/sample_id/event_index`）。
+   - `event_index`：对应 FCS 行号，从 0 开始递增。若原始 CSV 与 FCS 顺序一致，可直接添加 `df["event_index"] = range(len(df))`；
+   - `cell_type`：真实细胞类别（`H`、`G`、`C`、`Mono`、`Lym`、`Gra`、`F` 等）。
+2. **按坐标系拆分的标注如何合并？** 可以参考下面的示例脚本，按行拼接 `CSV/target/<sample>/annotation_*.csv`：
 
-> 提示：若原始标注按坐标组合分别保存（类似截图中的三份 `annotation_*.csv`），请先合并为一个文件，并确保 `sample_id` 与 FCS 对应，否则无法对齐事件级预测。
+   ```python
+   import pandas as pd
+   from pathlib import Path
+
+   def merge_target_annotations(root: Path, sample: str) -> pd.DataFrame:
+       files = sorted((root / sample).glob('annotation_*.csv'))
+       dfs = [pd.read_csv(f) for f in files]
+       merged = pd.concat(dfs, axis=1)
+       merged = merged.loc[:, ~merged.columns.duplicated()]
+       merged['sample_id'] = sample
+       merged['event_index'] = range(len(merged))
+       merged = merged.rename(columns={'cell_type': 'cell_type_hint'})
+       merged['cell_type'] = merged['cell_type_hint'].replace('', 'UNGATED')
+       return merged[['sample_id', 'event_index', 'cell_type']]
+   ```
+
+   根据实际列名调整即可，关键是保证 `event_index` 与 FCS 行完全对齐。
+3. **保存位置**：可以将全部样本合并为一个 CSV（推荐 `data/eval/labels.csv`），也可以一个样本一份放在目录 `data/eval/labels/` 下，文件名任意但需保持 `.csv` 后缀。
+4. **配置修改**：在 `cfg/panel.yaml` 中设置 `io.eval_truth_csv` 指向该 CSV 或目录；`evaluation.label_column/sample_id_column/event_index_column` 可按需要调整（默认 `cell_type/sample_id/event_index`）。
 
 ### 3. 准备目标数据
 

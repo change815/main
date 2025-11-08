@@ -1,0 +1,18 @@
+# Specification describing how to turn annotation CSVs into polygon gates.
+# Each coordinate system entry maps to the CSV file name inside every sample
+# directory under CSV/train or CSV/target.
+coordinate_systems:
+  - file: "annotation_CD34 ECD-A_CD45 APC-A750-A.csv"
+    channel_x: "CD45 APC-A750-A"
+    channel_y: "CD34 ECD-A"
+    populations: ["H"]
+  - file: "annotation_CD117 PE-A_CD45 APC-A750-A.csv"
+    channel_x: "CD45 APC-A750-A"
+    channel_y: "CD117 PE-A"
+    populations: ["G"]
+  - file: "annotation_SSC-A_CD45 APC-A750-A.csv"
+    channel_x: "CD45 APC-A750-A"
+    channel_y: "SSC-A"
+    populations: ["C", "Mono", "Lym", "Gra", "F"]
+label_column: cell_type
+parent_id: root
