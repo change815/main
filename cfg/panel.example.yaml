@@ -7,14 +7,18 @@ io:
   plots_dir: ./out/gates/plots
   eval_truth_csv: ./data/eval/truth.csv
 panel:
-  channels: [FSC-A, SSC-A, CD3-A, CD8-A]
+  channels:
+    - "CD45 APC-A750-A"
+    - "CD34 ECD-A"
+    - "CD117 PE-A"
+    - "SSC-A"
   transform: asinh
   compensation: auto
   ranges:
-    FSC-A: [0.0, 5.0]
-    SSC-A: [0.0, 5.0]
-    CD3-A: [0.0, 5.0]
-    CD8-A: [0.0, 5.0]
+    "CD45 APC-A750-A": [0.0, 1.0]
+    "CD34 ECD-A": [0.0, 1.0]
+    "CD117 PE-A": [0.0, 1.0]
+    "SSC-A": [0.0, 1.0]
 imaging:
   bins: 256
   smooth_sigma: 0

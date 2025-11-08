@@ -111,6 +111,9 @@ def transform_gate(
     src_points = [source_density.data_to_index(x, y) for x, y in gate.points]
     transformed_idx = apply_transform_to_points(transform, src_points)
     transformed_points = [target_density.index_to_data(ix, iy) for ix, iy in transformed_idx]
+    transformed_points = [
+        (float(np.round(x, 12)), float(np.round(y, 12))) for x, y in transformed_points
+    ]
     return Gate(
         gate_id=gate.gate_id,
         parent_id=gate.parent_id,
@@ -215,15 +218,11 @@ def assign_populations(data: pd.DataFrame, gates: Sequence[Gate]) -> pd.DataFram
             )
         masks[gate.gate_id] = mask
 
-    leaves = [
-        gate_id
-        for gate_id in gate_map
-        if gate_id not in {g.parent_id for g in gates if _normalize_parent_id(g.parent_id)}
-    ]
-
-    if not leaves:
-        LOGGER.warning("No leaf gates detected; assigning using all gates as populations")
-        leaves = list(gate_map.keys())
+    assignment_order = [gate_id for gate_id, gate in gate_map.items() if gate.population]
+    if not assignment_order:
+        LOGGER.warning("No populated gates detected; assigning using all gates")
+        assignment_order = list(gate_map.keys())
+    assignment_order = sorted(assignment_order, key=lambda g: depth_cache.get(g, 0))
 
     assigned_labels = np.array(["UNGATED"] * len(data), dtype=object)
     assigned_gate_ids = np.array([""] * len(data), dtype=object)
@@ -241,7 +240,7 @@ def assign_populations(data: pd.DataFrame, gates: Sequence[Gate]) -> pd.DataFram
             current = gate_map[parent_norm]
         return "/".join(reversed(parts))
 
-    for gate_id in sorted(leaves, key=lambda g: depth_cache.get(g, 0)):
+    for gate_id in assignment_order:
         if gate_id not in masks:
             LOGGER.warning("Leaf gate %s has no computed mask; skipping", gate_id)
             continue
