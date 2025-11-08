@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,8 @@ from .imaging import DensityImage
 from .register import apply_transform_to_points
 
 LOGGER = logging.getLogger(__name__)
+
+ROOT_ALIASES = {"", "root", "ROOT", "Root", None}
 
 
 @dataclass
@@ -110,3 +112,138 @@ def points_in_polygon(points: np.ndarray, polygon: Sequence[Tuple[float, float]]
     """Return boolean mask of points inside polygon."""
     path = MplPath(polygon)
     return path.contains_points(points)
+
+
+def _normalize_parent_id(parent_id: Optional[str]) -> Optional[str]:
+    if parent_id in ROOT_ALIASES:
+        return None
+    if parent_id is None:
+        return None
+    return str(parent_id)
+
+
+def assign_populations(data: pd.DataFrame, gates: Sequence[Gate]) -> pd.DataFrame:
+    """Assign each event in ``data`` to the deepest gate it belongs to.
+
+    Parameters
+    ----------
+    data:
+        Preprocessed events with columns covering all gate channels.
+    gates:
+        Sequence of gates (typically already transformed to target space).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Table with event_index, population label, gate depth, and gate path.
+    """
+
+    if not len(gates):
+        LOGGER.warning("No gates provided for population assignment")
+        return pd.DataFrame(
+            {
+                "event_index": np.arange(len(data), dtype=int),
+                "population": ["UNGATED"] * len(data),
+                "depth": [-1] * len(data),
+                "gate_path": [""] * len(data),
+            }
+        )
+
+    gate_map: Dict[str, Gate] = {}
+    for gate in gates:
+        if gate.gate_id in gate_map:
+            LOGGER.warning("Duplicate gate_id %s encountered; later gate overrides", gate.gate_id)
+        gate_map[gate.gate_id] = gate
+
+    def compute_depth(gate_id: str, stack: Optional[Tuple[str, ...]] = None) -> int:
+        stack = stack or tuple()
+        if gate_id in depth_cache:
+            return depth_cache[gate_id]
+        if gate_id in stack:
+            cycle = " -> ".join(stack + (gate_id,))
+            raise ValueError(f"Cycle detected in gate hierarchy: {cycle}")
+        gate = gate_map[gate_id]
+        parent_norm = _normalize_parent_id(gate.parent_id)
+        if parent_norm is None or parent_norm not in gate_map:
+            depth_cache[gate_id] = 0
+        else:
+            depth_cache[gate_id] = compute_depth(parent_norm, stack + (gate_id,)) + 1
+        return depth_cache[gate_id]
+
+    depth_cache: Dict[str, int] = {}
+    for gid in gate_map:
+        compute_depth(gid)
+
+    gate_order = sorted(gates, key=lambda g: depth_cache.get(g.gate_id, 0))
+    masks: Dict[str, np.ndarray] = {}
+
+    for gate in gate_order:
+        try:
+            points = data[[gate.channel_x, gate.channel_y]].to_numpy()
+        except KeyError:
+            LOGGER.error(
+                "Data missing channels required for gate %s (%s,%s); skipping",
+                gate.gate_id,
+                gate.channel_x,
+                gate.channel_y,
+            )
+            continue
+        mask = points_in_polygon(points, gate.points)
+        parent_norm = _normalize_parent_id(gate.parent_id)
+        if parent_norm and parent_norm in masks:
+            mask = mask & masks[parent_norm]
+        elif parent_norm and parent_norm not in gate_map:
+            LOGGER.warning(
+                "Gate %s references unknown parent %s; treating as root gate",
+                gate.gate_id,
+                gate.parent_id,
+            )
+        masks[gate.gate_id] = mask
+
+    leaves = [
+        gate_id
+        for gate_id in gate_map
+        if gate_id not in {g.parent_id for g in gates if _normalize_parent_id(g.parent_id)}
+    ]
+
+    if not leaves:
+        LOGGER.warning("No leaf gates detected; assigning using all gates as populations")
+        leaves = list(gate_map.keys())
+
+    assigned_labels = np.array(["UNGATED"] * len(data), dtype=object)
+    assigned_depth = np.full(len(data), -1, dtype=int)
+    assigned_path = np.array([""] * len(data), dtype=object)
+
+    def build_path(gate_id: str) -> str:
+        parts = [gate_id]
+        current = gate_map[gate_id]
+        while True:
+            parent_norm = _normalize_parent_id(current.parent_id)
+            if parent_norm is None or parent_norm not in gate_map:
+                break
+            parts.append(parent_norm)
+            current = gate_map[parent_norm]
+        return "/".join(reversed(parts))
+
+    for gate_id in sorted(leaves, key=lambda g: depth_cache.get(g, 0)):
+        if gate_id not in masks:
+            LOGGER.warning("Leaf gate %s has no computed mask; skipping", gate_id)
+            continue
+        mask = masks[gate_id]
+        depth = depth_cache.get(gate_id, 0)
+        update_mask = mask & (depth >= assigned_depth)
+        if not np.any(update_mask):
+            continue
+        assigned_labels[update_mask] = gate_id
+        assigned_depth[update_mask] = depth
+        path_str = build_path(gate_id)
+        assigned_path[update_mask] = path_str
+
+    return pd.DataFrame(
+        {
+            "event_index": np.arange(len(data), dtype=int),
+            "population": assigned_labels,
+            "depth": assigned_depth,
+            "gate_path": assigned_path,
+        }
+    )

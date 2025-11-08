@@ -6,7 +6,7 @@ np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 sitk = pytest.importorskip("SimpleITK")
 
-from autogate.gates import Gate, read_gates, transform_gate
+from autogate.gates import Gate, assign_populations, read_gates, transform_gate
 from autogate.imaging import DensityImage
 
 
@@ -51,3 +51,33 @@ def test_transform_gate_identity():
     transform = sitk.Transform(2, sitk.sitkIdentity)
     transformed = transform_gate(gate, transform, density, density)
     assert transformed.points == gate.points
+
+
+def test_assign_populations_hierarchy():
+    df = pd.DataFrame(
+        {
+            "A": [0.1, 0.5, 0.8, 1.5],
+            "B": [0.1, 0.5, 0.8, 1.5],
+        }
+    )
+    gates = [
+        Gate(
+            gate_id="root_gate",
+            parent_id="root",
+            gate_type="polygon",
+            channel_x="A",
+            channel_y="B",
+            points=[(0, 0), (1, 0), (1, 1), (0, 1)],
+        ),
+        Gate(
+            gate_id="child_gate",
+            parent_id="root_gate",
+            gate_type="polygon",
+            channel_x="A",
+            channel_y="B",
+            points=[(0.4, 0.4), (0.9, 0.4), (0.9, 0.9), (0.4, 0.9)],
+        ),
+    ]
+    assignments = assign_populations(df, gates)
+    assert list(assignments["population"]) == ["root_gate", "child_gate", "child_gate", "UNGATED"]
+    assert assignments.loc[1, "depth"] > assignments.loc[0, "depth"]

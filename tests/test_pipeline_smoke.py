@@ -86,3 +86,7 @@ def test_pipeline_smoke(tmp_path: Path):
     assert summary["targets"], "Expect targets summary"
     output_files = list(out_dir.glob("*_gates.csv"))
     assert output_files, "Expected gate CSV outputs"
+    labels_dir = out_dir / "event_labels"
+    assert (labels_dir / "target1_labels.csv").exists(), "Expected per-event labels"
+    plots_dir = out_dir / "plots"
+    assert list(plots_dir.glob("*.png")), "Expected visualization PNGs"

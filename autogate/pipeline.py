@@ -9,11 +9,18 @@ from typing import Dict, Iterable, List, Mapping, Tuple
 
 
 from .config import ensure_ranges
-from .gates import Gate, read_gates, transform_gate, write_gates
+from .gates import (
+    Gate,
+    assign_populations,
+    read_gates,
+    transform_gate,
+    write_gates,
+)
 from .imaging import DensityImage, compute_density_image
 from .io_fcs import FCSLoader
 from .register import RegistrationError, register_bspline
 from .selector import select_best
+from .visualize import plot_population_scatter
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +68,12 @@ class AutoGatePipeline:
         self.training_density: Dict[str, Dict[Tuple[str, str], DensityImage]] = defaultdict(dict)
         self.training_gates: Dict[str, Dict[Tuple[str, str], List[Gate]]] = defaultdict(lambda: defaultdict(list))
         self.training_data_paths: Dict[str, Path] = {}
+        io_cfg = config.get("io", {})
+        self.gates_out_dir = Path(io_cfg.get("out_dir", "./out/gates"))
+        labels_default = self.gates_out_dir / "event_labels"
+        plots_default = self.gates_out_dir / "plots"
+        self.labels_dir = Path(io_cfg.get("labels_dir", labels_default))
+        self.plots_dir = Path(io_cfg.get("plots_dir", plots_default))
 
     def _list_fcs_files(self, directory: Path) -> List[Path]:
         if not directory.exists():
@@ -127,8 +140,10 @@ class AutoGatePipeline:
         self.prepare_training()
         io_cfg = self.config.get("io", {})
         target_dir = Path(io_cfg.get("target_fcs_dir"))
-        out_dir = Path(io_cfg.get("out_dir", "./out/gates"))
+        out_dir = self.gates_out_dir
         out_dir.mkdir(parents=True, exist_ok=True)
+        self.labels_dir.mkdir(parents=True, exist_ok=True)
+        self.plots_dir.mkdir(parents=True, exist_ok=True)
 
         target_files = self._list_fcs_files(target_dir)
         plots = sorted({plot for per_train in self.training_gates.values() for plot in per_train.keys()})
@@ -198,6 +213,37 @@ class AutoGatePipeline:
 
             out_path = out_dir / f"{target_path.stem}_gates.csv"
             write_gates(out_path, all_transformed)
+
+            labels = assign_populations(data, all_transformed)
+            labels_path = self.labels_dir / f"{target_path.stem}_labels.csv"
+            labels.to_csv(labels_path, index=False)
+            LOGGER.info(
+                "Assigned populations for %s: %d labeled events (of %d)",
+                target_path.name,
+                int((labels["population"] != "UNGATED").sum()),
+                len(labels),
+            )
+
+            for plot in plots:
+                channel_x, channel_y = plot
+                figure_path = self.plots_dir / f"{target_path.stem}__{channel_x}__{channel_y}.png"
+                try:
+                    plot_population_scatter(
+                        data,
+                        labels["population"],
+                        channel_x,
+                        channel_y,
+                        figure_path,
+                    )
+                except Exception as exc:  # pragma: no cover - plotting errors are rare
+                    LOGGER.warning(
+                        "Failed to render plot for %s on plot %s/%s: %s",
+                        target_path.name,
+                        channel_x,
+                        channel_y,
+                        exc,
+                    )
+
             duration = time.time() - start
             LOGGER.info(
                 "Completed %s in %.2f seconds with %d gates", target_path.name, duration, len(all_transformed)
@@ -206,6 +252,8 @@ class AutoGatePipeline:
                 "file": target_path.name,
                 "gates": len(all_transformed),
                 "duration": duration,
+                "gate_file": str(out_path),
+                "labels_file": str(labels_path),
             })
             summary["selections"].extend(selection_records)
         return summary

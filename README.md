@@ -10,6 +10,7 @@ Autogate 是一个基于 SimpleITK B-样条弹性配准的自动圈门工具。�
 - ✅ **多训练样本自动选择**：对每个 plot 使用 L2 距离挑选最相似的训练图像再做配准。
 - ✅ **配置化管理**：通过 YAML 描述 I/O、通道量程、配准与日志参数，命令行可覆盖关键项。
 - ✅ **CLI 全流程**：`autogate init-config / run / eval` 覆盖初始化、运行与评估。
+- ✅ **事件级分类与可视化**：自动生成每个目标细胞的预测类别表与按坐标轴配色的散点图。
 - ✅ **日志追踪**：标准 logging 同时输出控制台与文件，记录耗时、样本选择、回退等信息。
 - ✅ **基础 F1 评估**：如提供真值 CSV，则可输出 precision/recall/F1 的 evaluation.csv。
 
@@ -52,7 +53,7 @@ SimpleITK 官方轮子覆盖主流平台 (`manylinux`, `win_amd64`, `macosx_arm6
 
 执行 `autogate init-config` 会在 `./cfg/panel.example.yaml` 下生成示例配置，字段说明：
 
-- `io.*`：训练/目标数据目录、训练门 CSV、输出目录及可选真值 CSV。
+- `io.*`：训练/目标数据目录、训练门 CSV、门输出目录以及可选的真值 CSV、事件级标签目录与可视化目录。
 - `panel.channels`：全局需要的通道列表；所有 FCS 必须包含这些列。
 - `panel.transform`：数值变换（目前支持 `asinh`、`log10`、或省略）。
 - `panel.compensation`：`auto`（使用 FCS 元数据）或指定补偿矩阵路径，`null` 表示不补偿。
@@ -118,6 +119,12 @@ autogate run --config cfg/panel.yaml --out-dir ./out/gates
 ```
 
 运行日志会在控制台滚动，同时写入 `out/logs/<timestamp>.log`。对于每个 `(channel_x, channel_y)` 组合，日志中会显示自动选择的训练样本及其 L2 距离。如果 SimpleITK 配准失败，会出现 `WARNING` 并自动回退为恒等变换。
+
+运行完成后会生成三类结果：
+
+- `out/gates/<sample>_gates.csv`：目标样本的形变后多边形门。可用于后续评估或导入流式软件。 
+- `out/gates/event_labels/<sample>_labels.csv`：逐细胞的预测类别，字段包括 `event_index`（原始顺序）、`population`（叶子门 ID）、`depth`（在门树的深度）和 `gate_path`（从根到该门的路径）。
+- `out/gates/plots/<sample>__<channel_x>__<channel_y>.png`：按配置通道组合绘制的散点图，不同颜色对应预测类别，可快速肉眼核对圈门效果。`UNGATED` 代表未被任何叶子门覆盖的事件。
 
 ### 6. （可选）评估 F1
 

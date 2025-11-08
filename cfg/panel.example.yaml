@@ -3,6 +3,8 @@ io:
   train_gates_csv: ./data/train/gates.csv
   target_fcs_dir: ./data/target
   out_dir: ./out/gates
+  labels_dir: ./out/gates/event_labels
+  plots_dir: ./out/gates/plots
   eval_truth_csv: ./data/eval/truth.csv
 panel:
   channels: [FSC-A, SSC-A, CD3-A, CD8-A]
